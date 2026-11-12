@@ -1,322 +1,747 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-    <meta charset="utf-8">
-    <meta name="description" content="Tower of Hanoi">
-    <title>Tower of Hanoi</title>
-    <link rel="stylesheet" type="text/css" href="style.css" />
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tower of Hanoi</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #fff; }
+  #view { width: 100%; height: 100%; display: block; cursor: grab; }
+  #view:active { cursor: grabbing; }
+  #hud {
+    position: fixed; inset: 0; pointer-events: none;
+    font: 12px/1.5 ui-monospace, 'SFMono-Regular', Menlo, monospace;
+    color: #333; -webkit-user-select: none; user-select: none;
+  }
+  #hud button {
+    pointer-events: auto; background: rgba(240, 240, 240, .9); color: #333;
+    border: 1px solid #ccc; padding: 8px 12px; margin: 3px;
+    font: 12px/1 ui-monospace, monospace; cursor: pointer; border-radius: 2px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  }
+  #hud button:hover:not(:disabled) { border-color: #888; background: #e0e0e0; }
+  #hud button:disabled { opacity: .4; cursor: not-allowed; }
+  #controls {
+    position: absolute; left: 16px; bottom: 16px;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px;
+  }
+  #info {
+    position: absolute; left: 16px; top: 16px;
+    background: rgba(255, 255, 255, .8); padding: 10px 14px;
+    border-left: 2px solid #333; box-shadow: 0 1px 4px rgba(0,0,0,.1);
+  }
+  #info .t { font-size: 14px; letter-spacing: .1em; color: #111; margin-bottom: 4px; font-weight: bold; }
+  #info .s { color: #666; }
+  #actions { position: absolute; right: 16px; bottom: 16px; }
+  #actions button { padding: 10px 20px; font-size: 13px; letter-spacing: .1em; }
+</style>
 </head>
-<body onload="setup()">
-    <canvas id="myCanvas" width="1200" height="600">Your browser does not support canvas, please use another browser.</canvas><br/>
-    <div id="left-buttons">
-        <button class="button" id="button-from1to2" type="button">move a disc from the 1st rod to the 2nd rod (press key Q)</button><br/>
-        <br/>
-        <button class="button" id="button-from1to3" type="button">move a disc from the 1st rod to the 3rd rod (press key A)</button><br/>
-        <br/>
-        <button class="button" id="button-solve-it" type="button">solve it!</button><br/>
-        <br/>
-    </div>
-    <div id="medium-buttons">
-        <button class="button" id="button-from2to1" type="button">move a disc from the 2nd rod to the 1st rod (press key W)</button><br/>
-        <br/>
-        <button class="button" id="button-from2to3" type="button">move a disc from the 2nd rod to the 3rd rod (press key S)</button><br/>
-        <br/>
-    </div>
-    <div id="right-buttons">
-        <button class="button" id="button-from3to1" type="button">move a disc from the 3rd rod to the 1st rod (press key E)</button><br/>
-        <br/>
-        <button class="button" id="button-from3to2" type="button">move a disc from the 3rd rod to the 2nd rod (press key D)</button><br/>
-        <br/>
-        <br/>
-    </div>
+<body>
+<canvas id="view"></canvas>
+<div id="hud">
+  <div id="info">
+    <div class="t">TOWER OF HANOI</div>
+    <div class="s">drag to orbit &middot; wheel to zoom</div>
+    <div style="margin-top:6px">Moves: <b id="moves" style="color:#111">0</b></div>
+  </div>
+  <div id="controls">
+    <button data-from="1" data-to="2">1 → 2 <span style="color:#888">[Q]</span></button>
+    <button data-from="1" data-to="3">1 → 3 <span style="color:#888">[A]</span></button>
+    <button data-from="2" data-to="3">2 → 3 <span style="color:#888">[S]</span></button>
+    <button data-from="2" data-to="1">2 → 1 <span style="color:#888">[W]</span></button>
+    <button data-from="3" data-to="1">3 → 1 <span style="color:#888">[E]</span></button>
+    <button data-from="3" data-to="2">3 → 2 <span style="color:#888">[D]</span></button>
+  </div>
+  <div id="actions">
+    <button id="solve">Solve</button>
+    <button id="reset">Reset</button>
+  </div>
+</div>
+<script type="module">
+'use strict';
 
-    <script id="shadow-vs" type="not-js">
-        attribute vec3 vPosition;
-        uniform mat4 uMVP; // model-view-projection matrix
+const canvas = document.getElementById('view');
+const gl = canvas.getContext('webgl2', { antialias: true, alpha: false });
+if (!gl) { document.body.innerHTML = '<p style="color:#000;padding:24px">WebGL2 is required.</p>'; throw new Error('no webgl2'); }
 
-        void main(void) {
-            gl_Position = uMVP * vec4(vPosition, 1.0); // compute position in light coordinate
-        }
-    </script>
-    <script id="shadow-fs" type="not-js">
-        #ifdef GL_ES
-            precision highp float;
-        #endif
-        // we use a texture as the depth map and all channels of a texture (r, g, b and a) are 8-bit, so every point in
-        // a texture is 32-bit. Float here is 16-bit, so if we utilize all 32 bits in a texture, it is quite sufficient.
-        const vec4 bitShift = vec4(1.0, 256.0, 256.0 * 256.0, 256.0 * 256.0 * 256.0);
-        const vec4 bitMask = vec4(1.0 / 256.0, 1.0 / 256.0, 1.0 / 256.0, 0.0);
+// ============================================================================
+//  Helper Functions
+// ============================================================================
+function compile(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    console.error(gl.getShaderInfoLog(s));
+    throw new Error('shader compile failed');
+  }
+  return s;
+}
+function link(vs, fs, attribs = {}) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  for (const [name, loc] of Object.entries(attribs)) gl.bindAttribLocation(p, loc, name);
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+    console.error(gl.getProgramInfoLog(p));
+    throw new Error('program link failed');
+  }
+  return p;
+}
+function buf(target, data, usage = gl.STATIC_DRAW) {
+  const b = gl.createBuffer();
+  gl.bindBuffer(target, b);
+  gl.bufferData(target, data, usage);
+  return b;
+}
 
-        void main(void) {
-            vec4 rgbaDepth = fract(gl_FragCoord.z * bitShift);
-            rgbaDepth -= rgbaDepth.gbaa * bitMask;
-	        gl_FragColor = rgbaDepth;
-        }
-    </script>
+const M4 = {
+  create() { return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]); },
+  identity(o) { o.set([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]); return o; },
+  perspective(o, fovy, aspect, near, far) {
+    const f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far);
+    o[0]=f/aspect; o[1]=0; o[2]=0; o[3]=0;
+    o[4]=0; o[5]=f; o[6]=0; o[7]=0;
+    o[8]=0; o[9]=0; o[10]=(far+near)*nf; o[11]=-1;
+    o[12]=0; o[13]=0; o[14]=2*far*near*nf; o[15]=0;
+    return o;
+  },
+  lookAt(o, eye, center, up) {
+    let z0 = eye[0]-center[0], z1 = eye[1]-center[1], z2 = eye[2]-center[2];
+    let l = 1/Math.hypot(z0,z1,z2); z0*=l; z1*=l; z2*=l;
+    let x0 = up[1]*z2 - up[2]*z1, x1 = up[2]*z0 - up[0]*z2, x2 = up[0]*z1 - up[1]*z0;
+    l = Math.hypot(x0,x1,x2); if (l) { l=1/l; x0*=l; x1*=l; x2*=l; }
+    let y0 = z1*x2 - z2*x1, y1 = z2*x0 - z0*x2, y2 = z0*x1 - z1*x0;
+    o[0]=x0; o[1]=y0; o[2]=z0; o[3]=0;
+    o[4]=x1; o[5]=y1; o[6]=z1; o[7]=0;
+    o[8]=x2; o[9]=y2; o[10]=z2; o[11]=0;
+    o[12]=-(x0*eye[0]+x1*eye[1]+x2*eye[2]);
+    o[13]=-(y0*eye[0]+y1*eye[1]+y2*eye[2]);
+    o[14]=-(z0*eye[0]+z1*eye[1]+z2*eye[2]);
+    o[15]=1;
+    return o;
+  },
+  ortho(o, l, r, b, t, n, f) {
+    o[0]=2/(r-l); o[1]=0; o[2]=0; o[3]=0;
+    o[4]=0; o[5]=2/(t-b); o[6]=0; o[7]=0;
+    o[8]=0; o[9]=0; o[10]=-2/(f-n); o[11]=0;
+    o[12]=-(r+l)/(r-l); o[13]=-(t+b)/(t-b); o[14]=-(f+n)/(f-n); o[15]=1;
+    return o;
+  },
+  translate(o, a, v) {
+    if (o !== a) o.set(a);
+    o[12] = a[0]*v[0] + a[4]*v[1] + a[8]*v[2] + a[12];
+    o[13] = a[1]*v[0] + a[5]*v[1] + a[9]*v[2] + a[13];
+    o[14] = a[2]*v[0] + a[6]*v[1] + a[10]*v[2] + a[14];
+    o[15] = a[3]*v[0] + a[7]*v[1] + a[11]*v[2] + a[15];
+    return o;
+  },
+};
 
-    <script id="ground-vs" type="not-js">
-        attribute vec3 vPosition;
-        uniform mat4 uMVP;
-        uniform mat4 uMVPFromLight;
-        varying vec4 vPositionFromLight;
+// ============================================================================
+//  Geometry
+// ============================================================================
+function makeCylinder(rTop, rBottom, height, seg, capTop, capBottom) {
+  const P = [], N = [], U = [], I = [];
+  const h = height / 2, TAU = Math.PI * 2;
+  const slope = (rBottom - rTop) / height;
+  const nl = Math.hypot(1, slope);
+  for (let i = 0; i <= seg; i++) {
+    const t = i / seg, th = t * TAU, s = Math.sin(th), c = Math.cos(th);
+    P.push(rBottom*s, -h, rBottom*c); N.push(s/nl, slope/nl, c/nl); U.push(t, 0);
+    P.push(rTop*s,      h, rTop*c);   N.push(s/nl, slope/nl, c/nl); U.push(t, 1);
+  }
+  for (let i = 0; i < seg; i++) { const a = i*2; I.push(a, a+1, a+2, a+1, a+3, a+2); }
+  if (capTop && rTop > 0) {
+    const base = P.length / 3;
+    P.push(0, h, 0); N.push(0, 1, 0); U.push(0.5, 0.5);
+    for (let i = 0; i <= seg; i++) {
+      const t = i/seg, th = t*TAU, s = Math.sin(th), c = Math.cos(th);
+      P.push(rTop*s, h, rTop*c); N.push(0, 1, 0); U.push(s*0.5+0.5, c*0.5+0.5);
+    }
+    for (let i = 0; i < seg; i++) I.push(base, base+1+i, base+2+i);
+  }
+  if (capBottom && rBottom > 0) {
+    const base = P.length / 3;
+    P.push(0, -h, 0); N.push(0, -1, 0); U.push(0.5, 0.5);
+    for (let i = 0; i <= seg; i++) {
+      const t = i/seg, th = t*TAU, s = Math.sin(th), c = Math.cos(th);
+      P.push(rBottom*s, -h, rBottom*c); N.push(0, -1, 0); U.push(s*0.5+0.5, c*0.5+0.5);
+    }
+    for (let i = 0; i < seg; i++) I.push(base, base+2+i, base+1+i);
+  }
+  return { positions: new Float32Array(P), normals: new Float32Array(N), uvs: new Float32Array(U), indices: new Uint16Array(I) };
+}
 
-        void main(void) {
-            vPositionFromLight = uMVPFromLight * vec4(vPosition, 1.0); // compute position in light coordinate
-            gl_Position = uMVP * vec4(vPosition, 1.0);
-        }
-    </script>
-    <script id="ground-fs" type="not-js">
-        /**
-         * we do not use any texture to draw ground
-         */
-        #ifdef GL_ES
-            precision highp float;
-        #endif
-        uniform vec3 uColor; // the ground's color
-        uniform vec3 uLightColor;
-        uniform sampler2D uShadowMap; // depth value in light coordinate
-        uniform float uShadowMapResolution;
-        varying vec4 vPositionFromLight;
+function makeAnnulus(innerR, outerR, height, seg) {
+  const P = [], N = [], U = [], I = [];
+  const h = height / 2, TAU = Math.PI * 2;
+  const strip = (rInner, rOuter, y, ny, side) => {
+    const base = P.length / 3;
+    for (let i = 0; i <= seg; i++) {
+      const t = i/seg, th = t*TAU, s = Math.sin(th), c = Math.cos(th);
+      P.push(rInner*s, y, rInner*c); N.push(0, ny, 0); U.push(s*(rInner/outerR)*0.5+0.5, c*(rInner/outerR)*0.5+0.5);
+      P.push(rOuter*s, y, rOuter*c); N.push(0, ny, 0); U.push(s*0.5+0.5, c*0.5+0.5);
+    }
+    for (let i = 0; i < seg; i++) {
+      const a = base + i*2;
+      if (side > 0) I.push(a, a+1, a+2, a+1, a+3, a+2);
+      else           I.push(a, a+2, a+1, a+1, a+2, a+3);
+    }
+  };
+  const wall = (r, y0, y1, nx, nz) => {
+    const base = P.length / 3;
+    for (let i = 0; i <= seg; i++) {
+      const t = i/seg, th = t*TAU, s = Math.sin(th), c = Math.cos(th);
+      P.push(r*s, y0, r*c); N.push(s*nx, 0, c*nz); U.push(t, 0);
+      P.push(r*s, y1, r*c); N.push(s*nx, 0, c*nz); U.push(t, 1);
+    }
+    for (let i = 0; i < seg; i++) {
+      const a = base + i*2;
+      if (nx > 0) I.push(a, a+1, a+2, a+1, a+3, a+2);
+      else        I.push(a, a+2, a+1, a+1, a+2, a+3);
+    }
+  };
+  wall(outerR, -h, h,  1,  1);
+  wall(innerR, -h, h, -1, -1);
+  strip(innerR, outerR,  h,  1,  1);
+  strip(innerR, outerR, -h, -1, -1);
+  return { positions: new Float32Array(P), normals: new Float32Array(N), uvs: new Float32Array(U), indices: new Uint16Array(I) };
+}
 
-        /**
-         * compute z-value from a vec4
-         */
-        float unpackDepth(const in vec4 rgbaDepth) {
-            const vec4 bitShift = vec4(1.0, 1.0 / 256.0, 1.0 / (256.0 * 256.0), 1.0 / (256.0 * 256.0 * 256.0));
-            float depth = dot(rgbaDepth, bitShift);
-            return depth;
-        }
+function createVAO(geo) {
+  const vao = gl.createVertexArray();
+  gl.bindVertexArray(vao);
+  buf(gl.ARRAY_BUFFER, geo.positions); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+  buf(gl.ARRAY_BUFFER, geo.normals);   gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
+  buf(gl.ARRAY_BUFFER, geo.uvs);       gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 0, 0);
+  buf(gl.ELEMENT_ARRAY_BUFFER, geo.indices);
+  gl.bindVertexArray(null);
+  return { vao, count: geo.indices.length };
+}
 
-        /**
-         * compute the visibility coefficient
-         */
-        float getVisibility(vec3 shadowCoordinate) {
-            float sum = 0.0;
-            // use a simple and incomplete but good enough percentage-closer filtering method.
-            // take 16 points on shadow map as the sampler.
-            for (float x = -1.5; x <= 1.5; x += 1.0) {
-                for (float y = -1.5; y <= 1.5; y += 1.0) {
-                    if(shadowCoordinate.z > 1.0) {
-                        // coordinates outside the far plane of the light's orthographic frustum will never be in shadow
-                        sum += 1.0;
-                    } else {
-                        vec2 biasedCoordinate = shadowCoordinate.xy + vec2(x, y) / uShadowMapResolution;
-                        float depth = 1.0; // all coordinates outside the depth map's range have a default depth of 1.0
-                        // which means these coordinates will never be in shadow since no object will have a depth larger than 1.0
-                        if (biasedCoordinate.x >= 0.0 && biasedCoordinate.x <= 1.0 && biasedCoordinate.y >= 0.0 && biasedCoordinate.y <= 1.0) {
-                            vec4 rgbaDepth = texture2D(uShadowMap, biasedCoordinate);
-                            depth = unpackDepth(rgbaDepth); // decode the depth value from the depth map
-                        }
-                        sum += (shadowCoordinate.z > depth + 0.005) ? 0.5 : 1.0; // add 0.005 to eliminate Mach band, also known as shadow acne
-                    }
-                }
-            }
-            return sum / 16.0;
-        }
+// ============================================================================
+//  Main Shaders
+// ============================================================================
+const VS_MAIN = `#version 300 es
+in vec3 aPos;
+in vec3 aNormal;
+in vec2 aUv;
+uniform mat4 uModel;
+uniform mat4 uView;
+uniform mat4 uProj;
+uniform mat4 uLightVP;
+out vec3 vWorldPos;
+out vec3 vNormal;
+out vec2 vUv;
+out vec4 vShadow;
+void main() {
+  vec4 wp = uModel * vec4(aPos, 1.0);
+  vWorldPos = wp.xyz;
+  vNormal = mat3(uModel) * aNormal;
+  vUv = aUv;
+  vShadow = uLightVP * wp;
+  gl_Position = uProj * uView * wp;
+}`;
 
-        void main(void) {
-            vec3 shadowCoordinate = (vPositionFromLight.xyz / vPositionFromLight.w) / 2.0 + 0.5;
-            float visibility = getVisibility(shadowCoordinate);
-            vec3 finalColor = clamp((uColor + uLightColor) / 2.0, 0.0, 1.0); // mix the ground's color and the light's color
-	        gl_FragColor = vec4(visibility * finalColor, 1.0);
-        }
-    </script>
+const FS_MAIN = `#version 300 es
+precision highp float;
+in vec3 vWorldPos;
+in vec3 vNormal;
+in vec2 vUv;
+in vec4 vShadow;
+out vec4 outColor;
 
-    <script id="rod-vs" type="not-js">
-        attribute vec3 vPosition;
-        attribute vec3 vNormal;
-        attribute vec2 vTexCoord;
-        uniform mat4 uModelView;
-        uniform mat4 uProjection;
-        uniform mat4 uNormal;
-        uniform mat4 uMVPFromLight;
-        varying vec3 fNormal;
-        varying vec3 fPosition;
-        varying vec2 fTexCoord;
-        varying vec4 vPositionFromLight;
+uniform vec3 uLightDir;
+uniform vec3 uLightColor;
+uniform vec3 uViewPos;
+uniform vec3 uTint;
+uniform float uRoughness;
+uniform float uSpecular;
+uniform float uIsWood;
+uniform sampler2D uShadowMap;
 
-        void main(void) {
-            vPositionFromLight = uMVPFromLight * vec4(vPosition, 1.0); // compute position in light coordinate
-            fNormal = (uNormal * vec4(vNormal, 1.0)).xyz; // normals in camera coordinate
-            fPosition = (uModelView * vec4(vPosition, 1.0)).xyz; // vertex position in camera coordinate
-            fTexCoord = vTexCoord;
-            gl_Position = uProjection * uModelView * vec4(vPosition, 1.0);
-        }
-    </script>
-    <script id="rod-fs" type="not-js">
-        /**
-         * we do use image texture to draw rods
-         */
-        #ifdef GL_ES
-            precision highp float;
-        #endif
-        uniform vec3 uLightDirection;
-        uniform vec3 uLightColor;
-        uniform sampler2D uShadowMap; // depth value in light coordinate
-        uniform sampler2D uTexSampler;
-        varying vec3 fNormal;
-        varying vec3 fPosition; // vertex position in camera coordinate
-        varying vec2 fTexCoord;
-        varying vec4 vPositionFromLight;
+float hash(vec2 p) {
+  return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+}
+float noise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f*f*(3.0-2.0*f);
+  return mix(mix(hash(i + vec2(0.0,0.0)), hash(i + vec2(1.0,0.0)), u.x),
+             mix(hash(i + vec2(0.0,1.0)), hash(i + vec2(1.0,1.0)), u.x), u.y);
+}
+float fbm(vec2 p) {
+  float v = 0.0, a = 0.5;
+  for(int i=0; i<4; i++) { v += a * noise(p); p *= 2.0; a *= 0.5; }
+  return v;
+}
 
-        /**
-        * compute the Blinn-Phong shading model
-        * @param lightDirection: the direction of the light in camera coordinate
-        * @param lightIntensity: the intensity of the light
-        * @param ambientCoefficient: the coefficient of ambient light
-        * @param diffuseCoefficient: the coefficient of diffuse light
-        * @param specularCoefficient: the coefficient of specular light
-        * @param specularExponent: the lightiness of specular light
-        * @return a 2D vector whose first element is the combination final coefficient of ambient light and diffuse
-        * light while the second element is the final coefficient of specular light
-        */
-        vec2 blinnPhongShading(vec3 lightDirection, float lightIntensity, float ambientCoefficient,
-            float diffuseCoefficient, float specularCoefficient, float specularExponent)
-        {
-            lightDirection = normalize(lightDirection);
-            vec3 eyeDirection = normalize(-fPosition);
-            vec3 normal = normalize(fNormal);
-            vec3 halfVector = normalize(eyeDirection + lightDirection);
-            float ambientAndDiffuse = ambientCoefficient + diffuseCoefficient * lightIntensity * max(0.0, dot(normal,
-                lightDirection));
-            float specular = specularCoefficient * pow(max(0.0, dot(normal, halfVector)), specularExponent);
-            return vec2(ambientAndDiffuse, specular);
-        }
+float shadowAt(vec3 N, vec3 L) {
+  vec3 c = vShadow.xyz / vShadow.w;
+  c = c * 0.5 + 0.5;
+  if (c.x <= 0.0 || c.x >= 1.0 || c.y <= 0.0 || c.y >= 1.0 || c.z >= 1.0) return 1.0;
+  
+  float bias = max(0.005 * (1.0 - dot(N, L)), 0.0005);
+  float sum = 0.0;
+  vec2 texel = vec2(1.0 / 1024.0);
+  for (int x = -2; x <= 2; ++x) {
+    for (int y = -2; y <= 2; ++y) {
+      float pcfDepth = texture(uShadowMap, c.xy + vec2(x, y) * texel).r; 
+      sum += (c.z - bias > pcfDepth) ? 0.0 : 1.0;
+    }
+  }
+  return sum / 25.0;
+}
 
-        /**
-         * compute z-value from a vec4
-         */
-        float unpackDepth(const in vec4 rgbaDepth) {
-            const vec4 bitShift = vec4(1.0, 1.0 / 256.0, 1.0 / (256.0 * 256.0), 1.0 / (256.0 * 256.0 * 256.0));
-            float depth = dot(rgbaDepth, bitShift);
-            return depth;
-        }
+void main() {
+  vec3 baseColor;
 
-        void main(void) {
-            vec3 shadowCoordinate = (vPositionFromLight.xyz / vPositionFromLight.w) / 2.0 + 0.5;
-            vec4 rgbaDepth = texture2D(uShadowMap, shadowCoordinate.xy);
-            float depth = unpackDepth(rgbaDepth); // decode the depth value from the depth map
-            float visibility = (shadowCoordinate.z > depth + 0.00001) ? 0.7 : 1.0;
-            vec2 light = blinnPhongShading(uLightDirection, 1.0, 0.5, 1.0, 1.5, 100.0);
-            vec3 ambientAndDiffuseColor = light.x * texture2D(uTexSampler, fTexCoord).xyz;
-            vec3 specularColor = light.y * uLightColor;
-	        gl_FragColor = vec4(visibility * (ambientAndDiffuseColor + specularColor), 1.0);
-        }
-    </script>
+  if (uIsWood > 0.5) {
+    float isSide = 1.0 - smoothstep(0.7, 0.9, abs(vNormal.y));
+    vec2 uvSide = vec2(vUv.x * 20.0, vUv.y * 2.0);
+    float woodSide = fbm(uvSide) * 0.6 + noise(vec2(vUv.x * 80.0, vUv.y * 5.0)) * 0.4;
+    float r = length(vUv - 0.5) * 2.0;
+    float woodTop = fract(r * 15.0 + fbm(vUv * 5.0) * 1.5);
+    woodTop = smoothstep(0.3, 0.7, woodTop);
+    float woodPattern = mix(woodTop, woodSide, isSide);
+    
+    vec3 darkWood = vec3(0.4, 0.25, 0.15);
+    vec3 lightWood = vec3(0.85, 0.7, 0.55);
+    baseColor = mix(darkWood, lightWood, woodPattern);
+    baseColor *= pow(uTint, vec3(2.2));
+  } else {
+    baseColor = pow(uTint, vec3(2.2));
+  }
 
-    <script id="disc-vs" type="not-js">
-        attribute vec3 vPosition;
-        attribute vec3 vNormal;
-        uniform mat4 uModelView;
-        uniform mat4 uProjection;
-        uniform mat4 uNormal;
-        uniform mat4 uMVPFromLight;
-        varying vec3 fNormal;
-        varying vec3 fPosition; // vertex position in camera coordinate
-        varying vec3 uPosition; // pass on the original coordinate from the vertex shader to the fragment shader
-        // for procedure texture
-        varying vec4 vPositionFromLight;
+  vec3 N = normalize(vNormal);
+  vec3 L = normalize(uLightDir);
+  vec3 V = normalize(uViewPos - vWorldPos);
+  vec3 H = normalize(L + V);
 
-        void main(void) {
-            vPositionFromLight = uMVPFromLight * vec4(vPosition, 1.0); // compute position in light coordinate
-            fNormal = (uNormal * vec4(vNormal, 1.0)).xyz; // normals in camera coordinate
-            uPosition = vPosition; // vertex position in model coordinate
-            fPosition = (uModelView * vec4(vPosition, 1.0)).xyz; // vertex position in camera coordinate
-            gl_Position = uProjection * uModelView * vec4(vPosition, 1.0);
-        }
-    </script>
-    <script id="disc-fs" type="not-js">
-        /**
-         * we use procedural texture to draw discs
-         */
-        #ifdef GL_ES
-            precision highp float;
-        #endif
-        uniform vec3 uColor; // the object's color
-        uniform vec3 uLightDirection;
-        uniform vec3 uLightColor;
-        uniform sampler2D uShadowMap; // depth value in light coordinate
-        varying vec3 fNormal;
-        varying vec3 fPosition;
-        varying vec3 uPosition;
-        varying vec4 vPositionFromLight;
+  float diff = max(dot(N, L), 0.0);
+  float spec = pow(max(dot(N, H), 0.0), mix(8.0, 64.0, 1.0 - uRoughness)) * uSpecular;
+  float sh = shadowAt(N, L);
 
-        /**
-         * a pulse function in order to make stripe
-         */
-        float pulse(float value, float destination) {
-            return floor(mod(value * destination, 1.0) + 0.5);
-        }
+  vec3 ambient = baseColor * 0.4;
+  vec3 direct = baseColor * diff * uLightColor * sh;
+  vec3 specular = vec3(spec) * uLightColor * sh;
 
-        /**
-        * compute the Blinn-Phong shading model
-        * @param lightDirection: the direction of the light in camera coordinate
-        * @param lightIntensity: the intensity of the light
-        * @param ambientCoefficient: the coefficient of ambient light
-        * @param diffuseCoefficient: the coefficient of diffuse light
-        * @param specularCoefficient: the coefficient of specular light
-        * @param specularExponent: the lightiness of specular light
-        * @return a 2D vector whose first element is the combination final coefficient of ambient light and diffuse
-        * light while the second element is the final coefficient of specular light
-        */
-        vec2 blinnPhongShading(vec3 lightDirection, float lightIntensity, float ambientCoefficient,
-            float diffuseCoefficient, float specularCoefficient, float specularExponent)
-        {
-            lightDirection = normalize(lightDirection);
-            vec3 eyeDirection = normalize(-fPosition);
-            vec3 normal = normalize(fNormal);
-            vec3 halfVector = normalize(eyeDirection + lightDirection);
-            float ambientAndDiffuse = ambientCoefficient + diffuseCoefficient * lightIntensity * max(0.0, dot(normal,
-                lightDirection));
-            float specular = specularCoefficient * pow(max(0.0, dot(normal, halfVector)), specularExponent);
-            return vec2(ambientAndDiffuse, specular);
-        }
+  vec3 color = ambient + direct + specular;
+  outColor = vec4(pow(color, vec3(1.0 / 2.2)), 1.0);
+}`;
 
-        /**
-         * compute z-value from a vec4
-         */
-        float unpackDepth(const in vec4 rgbaDepth) {
-            const vec4 bitShift = vec4(1.0, 1.0 / 256.0, 1.0 / (256.0 * 256.0), 1.0 / (256.0 * 256.0 * 256.0));
-            float depth = dot(rgbaDepth, bitShift);
-            return depth;
-        }
+const VS_SHADOW = `#version 300 es
+in vec3 aPos;
+uniform mat4 uModel;
+uniform mat4 uLightVP;
+void main() { gl_Position = uLightVP * uModel * vec4(aPos, 1.0); }`;
 
-        void main(void) {
-            vec3 shadowCoordinate = (vPositionFromLight.xyz / vPositionFromLight.w) / 2.0 + 0.5;
-            vec4 rgbaDepth = texture2D(uShadowMap, shadowCoordinate.xy);
-            float depth = unpackDepth(rgbaDepth); // decode the depth value from the depth map
-            float visibility = (shadowCoordinate.z > depth + 0.00001) ? 0.7 : 1.0;
-            vec2 light = blinnPhongShading(uLightDirection, 1.0, 0.5, 1.0, 1.5, 30.0);
-            vec3 objectColor = (1.0 + 0.3 * pulse(uPosition.z, 0.1)) * uColor; // add some stripes
-            vec3 ambientAndDiffuseColor = light.x * objectColor;
-            vec3 specularColor = light.y * uLightColor;
-	        gl_FragColor = vec4(visibility * (ambientAndDiffuseColor + specularColor), 1.0);
-        }
-    </script>
+const FS_SHADOW = `#version 300 es
+precision highp float;
+void main() {}`;
 
-    <!-- always load libraries first-->
-    <script src="./Libraries/twgl-full.js"></script>
-    <script src="./Libraries/jquery-3.3.1.js"></script>
-    <script src="./Libraries/miscellaneousUtilities.js"></script>
+const mainProg = link(VS_MAIN, FS_MAIN, { aPos: 0, aNormal: 1, aUv: 2 });
+const shadowProg = link(VS_SHADOW, FS_SHADOW, { aPos: 0 });
 
-    <!-- compile shaders and define how to create all objects in local coordinate-->
-    <script src="./Objects/textures/woodTexture.js"></script> <!-- load textures before loading object models-->
-    <script src="./Objects/ground.js"></script> <!-- prototype of ground-->
-    <script src="./Objects/rod.js"></script> <!-- prototype of rod-->
-    <script src="./Objects/disc.js"></script> <!-- prototype of disc-->
-    <script src="./Objects/allObjects.js"></script> <!-- define the initialize procedure to create 3 rods and 4 discs
-    in terms of graphic models, so it should be loaded before main.js-->
+const U = (p, n) => gl.getUniformLocation(p, n);
+const mainU = {
+  uModel: U(mainProg, 'uModel'), uView: U(mainProg, 'uView'),
+  uProj: U(mainProg, 'uProj'), uLightVP: U(mainProg, 'uLightVP'),
+  uLightDir: U(mainProg, 'uLightDir'), uLightColor: U(mainProg, 'uLightColor'),
+  uViewPos: U(mainProg, 'uViewPos'), uTint: U(mainProg, 'uTint'),
+  uRoughness: U(mainProg, 'uRoughness'), uSpecular: U(mainProg, 'uSpecular'),
+  uIsWood: U(mainProg, 'uIsWood'),
+  uShadowMap: U(mainProg, 'uShadowMap'),
+};
+const shadowU = { uModel: U(shadowProg, 'uModel'), uLightVP: U(shadowProg, 'uLightVP') };
 
-    <!-- the game logic part-->
-    <script src="./GameCore/gameLogic.js"></script> <!-- load gameLogic.js first-->
-    <script src="./GameCore/AI.js"></script>
+// ============================================================================
+//  Shadow map Setup
+// ============================================================================
+const SHADOW_SIZE = 1024;
+const shadowTex = gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D, shadowTex);
+gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT24, SHADOW_SIZE, SHADOW_SIZE, 0, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT, null);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
-    <!-- user interaction methods-->
-    <script src="./UserInteraction/arcball.js"></script>
-    <script src="./UserInteraction/buttonClick.js"></script>
-    <script src="./UserInteraction/keyboard.js"></script>
+const shadowFBO = gl.createFramebuffer();
+gl.bindFramebuffer(gl.FRAMEBUFFER, shadowFBO);
+gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, shadowTex, 0);
+gl.drawBuffers([gl.NONE]);
+gl.readBuffer(gl.NONE);
+gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
-    <!-- This should be loaded last, so please keep the order of loading JavaScript Files -->
-    <script src="./main.js"></script>
+const lightVP = M4.create();
+{
+  const eye = [150, 200, 150];
+  const lv = M4.create(), lp = M4.create();
+  M4.lookAt(lv, eye, [0, 0, 0], [0, 1, 0]);
+  M4.ortho(lp, -250, 250, -250, 250, 1, 600);
+  const out = M4.create();
+  for (let col = 0; col < 4; col++) {
+    for (let row = 0; row < 4; row++) {
+      let s = 0;
+      for (let k = 0; k < 4; k++) s += lp[k*4 + row] * lv[col*4 + k];
+      out[col*4 + row] = s;
+    }
+  }
+  lightVP.set(out);
+}
+
+// ============================================================================
+//  Scene Setup
+// ============================================================================
+const ROD_DIST   = 160;
+const ROD_RADIUS = 10;
+const ROD_HEIGHT = 60;
+const DISC_H     = 10;
+const FLY_ALT    = 80;
+const DISC_OUTER = [60, 50, 40, 30];
+const DISC_INNER = ROD_RADIUS;
+const DISC_COLORS = [
+  [233, 153, 63],
+  [247, 237, 92],
+  [153, 196, 85],
+  [74, 164, 157],
+];
+
+const rodX = i => (i - 1) * ROD_DIST;
+
+const groundGeo = createVAO({
+  positions: new Float32Array([-400,0,-400, 400,0,-400, 400,0,400, -400,0,400]),
+  normals:   new Float32Array([0,1,0, 0,1,0, 0,1,0, 0,1,0]),
+  uvs:       new Float32Array([0,0, 1,0, 1,1, 0,1]),
+  indices:   new Uint16Array([0,2,1, 0,3,2]),
+});
+
+const rodGeo = createVAO(makeCylinder(ROD_RADIUS, ROD_RADIUS, ROD_HEIGHT, 32, true, true));
+const rodMeshes = [0, 1, 2].map(i => {
+  const m = M4.create();
+  M4.translate(m, m, [rodX(i), ROD_HEIGHT / 2, 0]);
+  return { geometry: rodGeo, model: m, tint: [1.0, 0.95, 0.9], rough: 0.75, spec: 0.1, isWood: 1.0 };
+});
+
+const discMeshes = DISC_OUTER.map((r, i) => {
+  const geo = createVAO(makeAnnulus(DISC_INNER, r, DISC_H, 48));
+  return {
+    geometry: geo, model: M4.create(),
+    tint: DISC_COLORS[i].map(c => c / 255),
+    rough: 0.6, spec: 0.2,
+    isWood: 0.0
+  };
+});
+
+// ============================================================================
+//  Game Logic
+// ============================================================================
+const game = {
+  rods: [[0, 1, 2, 3], [], []],
+  moving: null,
+  phase: 'idle',
+  moves: 0,
+  displayMode: false,
+  solution: null,
+  step: 0,
+  wait: 0,
+  hasWon: false,
+};
+
+function updateMovesDisplay() {
+  document.getElementById('moves').textContent = String(game.moves);
+}
+
+function tryMove(from, to) {
+  if (game.phase !== 'idle') return false;
+  const src = game.rods[from - 1], dst = game.rods[to - 1];
+  if (!src.length) return false;
+  
+  const disc = src[src.length - 1];
+  if (dst.length && disc < dst[dst.length - 1]) return false;
+
+  src.pop();
+  game.moving = {
+    discId: disc,
+    fromRod: from - 1,
+    toRod: to - 1,
+    pos: [rodX(from - 1), src.length * DISC_H, 0],
+  };
+  game.phase = 'up';
+  game.moves++;
+  updateMovesDisplay();
+  return true;
+}
+
+function stepAnimation(dt) {
+  if (game.phase === 'idle' || !game.moving) return;
+  const speed = 0.25;
+  const d = speed * dt;
+  const m = game.moving;
+
+  if (game.phase === 'up') {
+    m.pos[1] += d;
+    if (m.pos[1] >= FLY_ALT) { m.pos[1] = FLY_ALT; game.phase = 'across'; }
+  } else if (game.phase === 'across') {
+    const tx = rodX(m.toRod);
+    const dx = tx - m.pos[0];
+    if (Math.abs(dx) <= d) { m.pos[0] = tx; game.phase = 'down'; }
+    else m.pos[0] += Math.sign(dx) * d;
+  } else if (game.phase === 'down') {
+    const ty = game.rods[m.toRod].length * DISC_H;
+    if (m.pos[1] - d <= ty) {
+      m.pos[1] = ty;
+      game.rods[m.toRod].push(m.discId);
+      game.moving = null;
+      game.phase = 'idle';
+      checkWin();
+    } else m.pos[1] -= d;
+  }
+}
+
+function checkWin() {
+  if (game.hasWon || game.phase !== 'idle') return;
+  if (game.rods[2].length === 4) {
+    game.hasWon = true;
+    setTimeout(() => alert('Congratulations!'), 120);
+  }
+}
+
+function solveHanoi() {
+  const sol = [];
+  const rods = game.rods.map(r => r.slice());
+  const N = 4;
+  function findDisc(discId) {
+    for (let i = 0; i < rods.length; i++)
+      for (let j = 0; j < rods[i].length; j++)
+        if (rods[i][j] === discId) return i + 1;
+    return 0;
+  }
+  function hanoi(n, dest) {
+    if (n === 1) {
+      const rod = findDisc(N - 1);
+      if (rod !== dest) {
+        rods[dest - 1].push(rods[rod - 1].pop());
+        sol.push([rod, dest]);
+      }
+    } else {
+      const rod = findDisc(N - n);
+      if (rod !== dest) {
+        let temp;
+        for (let i = 1; i <= 3; i++) if (i !== rod && i !== dest) { temp = i; break; }
+        hanoi(n - 1, temp);
+        rods[dest - 1].push(rods[rod - 1].pop());
+        sol.push([rod, dest]);
+      }
+      hanoi(n - 1, dest);
+    }
+  }
+  hanoi(N, 3);
+  return sol;
+}
+
+function setDisplayMode(on) {
+  game.displayMode = on;
+  document.querySelectorAll('#controls button, #solve').forEach(b => b.disabled = on);
+}
+
+function startSolve() {
+  if (game.displayMode) return;
+  game.solution = solveHanoi();
+  game.step = 0;
+  game.wait = 0;
+  setDisplayMode(true);
+}
+
+function stepSolution(dt) {
+  if (!game.displayMode) return;
+  if (game.phase !== 'idle') return;
+  if (game.step < game.solution.length) {
+    if (game.wait <= 0) {
+      const [f, t] = game.solution[game.step];
+      const success = tryMove(f, t);
+      if (success) {
+        game.step++;
+        game.wait = 500;
+      } else {
+        game.solution = solveHanoi();
+        game.step = 0;
+        game.wait = 100;
+      }
+    } else {
+      game.wait = Math.max(game.wait - dt, 0);
+    }
+  } else {
+    game.solution = null;
+    setDisplayMode(false);
+  }
+}
+
+function resetGame() {
+  if (game.displayMode) return;
+  game.rods = [[0, 1, 2, 3], [], []];
+  game.moving = null;
+  game.phase = 'idle';
+  game.moves = 0;
+  game.hasWon = false;
+  game.solution = null;
+  game.step = 0;
+  game.wait = 0;
+  updateMovesDisplay();
+}
+
+// ============================================================================
+//  Camera and Input
+// ============================================================================
+const cam = { theta: 0.35, phi: 1.25, dist: 380, target: [0, 30, 0] };
+const viewM = M4.create(), projM = M4.create();
+let camPos = [0, 0, 0];
+
+function updateCamera() {
+  const sp = Math.sin(cam.phi), cp = Math.cos(cam.phi);
+  camPos = [
+    cam.target[0] + cam.dist * sp * Math.sin(cam.theta),
+    cam.target[1] + cam.dist * cp,
+    cam.target[2] + cam.dist * sp * Math.cos(cam.theta),
+  ];
+  M4.lookAt(viewM, camPos, cam.target, [0, 1, 0]);
+  M4.perspective(projM, Math.PI / 4, canvas.width / canvas.height, 1, 2000);
+}
+
+let dragging = false, lx = 0, ly = 0;
+canvas.addEventListener('mousedown', e => { dragging = true; lx = e.clientX; ly = e.clientY; });
+window.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  cam.theta -= (e.clientX - lx) * 0.008;
+  cam.phi = Math.max(0.15, Math.min(Math.PI - 0.15, cam.phi - (e.clientY - ly) * 0.008));
+  lx = e.clientX; ly = e.clientY;
+});
+window.addEventListener('mouseup', () => dragging = false);
+canvas.addEventListener('wheel', e => {
+  cam.dist = Math.max(120, Math.min(900, cam.dist + e.deltaY * 0.5));
+  e.preventDefault();
+}, { passive: false });
+
+document.querySelectorAll('#controls button').forEach(b => {
+  b.addEventListener('click', () => {
+    if (game.displayMode) return;
+    tryMove(+b.dataset.from, +b.dataset.to);
+  });
+});
+document.getElementById('solve').addEventListener('click', startSolve);
+document.getElementById('reset').addEventListener('click', resetGame);
+
+const keyMap = {
+  KeyQ: [1, 2], KeyA: [1, 3], KeyS: [2, 3],
+  KeyW: [2, 1], KeyE: [3, 1], KeyD: [3, 2],
+};
+window.addEventListener('keydown', e => {
+  const m = keyMap[e.code];
+  if (!m || game.displayMode) return;
+  e.preventDefault();
+  tryMove(m[0], m[1]);
+});
+
+// ============================================================================
+//  Render Loop
+// ============================================================================
+function updateDiscModel() {
+  for (let r = 0; r < 3; r++) {
+    for (let i = 0; i < game.rods[r].length; i++) {
+      const id = game.rods[r][i];
+      const m = discMeshes[id].model;
+      M4.identity(m);
+      M4.translate(m, m, [rodX(r), i * DISC_H + DISC_H / 2, 0]);
+    }
+  }
+  if (game.moving) {
+    const m = discMeshes[game.moving.discId].model;
+    M4.identity(m);
+    M4.translate(m, m, [game.moving.pos[0], game.moving.pos[1] + DISC_H / 2, game.moving.pos[2]]);
+  }
+}
+
+function drawObject(o, prog) {
+  gl.uniformMatrix4fv(prog === mainProg ? mainU.uModel : shadowU.uModel, false, o.model);
+  gl.bindVertexArray(o.geometry.vao);
+  gl.drawElements(gl.TRIANGLES, o.geometry.count, gl.UNSIGNED_SHORT, 0);
+}
+
+function render(now) {
+  const dt = Math.min(now - (render.last || now), 100);
+  render.last = now;
+
+  stepAnimation(dt);
+  stepSolution(dt);
+  updateDiscModel();
+  updateCamera();
+
+  // Shadow Pass
+  gl.bindFramebuffer(gl.FRAMEBUFFER, shadowFBO);
+  gl.viewport(0, 0, SHADOW_SIZE, SHADOW_SIZE);
+  gl.clear(gl.DEPTH_BUFFER_BIT);
+  gl.enable(gl.DEPTH_TEST);
+  gl.useProgram(shadowProg);
+  gl.uniformMatrix4fv(shadowU.uLightVP, false, lightVP);
+  for (const r of rodMeshes) drawObject(r, shadowProg);
+  for (const d of discMeshes) drawObject(d, shadowProg);
+
+  // Main Pass
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.clearColor(1.0, 1.0, 1.0, 1); 
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.useProgram(mainProg);
+
+  gl.uniformMatrix4fv(mainU.uView, false, viewM);
+  gl.uniformMatrix4fv(mainU.uProj, false, projM);
+  gl.uniformMatrix4fv(mainU.uLightVP, false, lightVP);
+  
+  gl.uniform3fv(mainU.uLightDir, [150, 200, 150].map(v => v / Math.hypot(150, 200, 150)));
+  gl.uniform3fv(mainU.uLightColor, [1.0, 1.0, 1.0]);
+  gl.uniform3fv(mainU.uViewPos, camPos);
+
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, shadowTex); gl.uniform1i(mainU.uShadowMap, 2);
+
+  // Ground
+  gl.uniform3fv(mainU.uTint, [0.95, 0.95, 0.95]);
+  gl.uniform1f(mainU.uRoughness, 1.0);
+  gl.uniform1f(mainU.uSpecular, 0.0);
+  gl.uniform1f(mainU.uIsWood, 0.0);
+  gl.bindVertexArray(groundGeo.vao);
+  M4.identity(groundGeo._m || (groundGeo._m = M4.create()));
+  gl.uniformMatrix4fv(mainU.uModel, false, groundGeo._m);
+  gl.drawElements(gl.TRIANGLES, groundGeo.count, gl.UNSIGNED_SHORT, 0);
+
+  // Draw objects
+  const drawMesh = (mesh) => {
+    gl.uniform3fv(mainU.uTint, mesh.tint);
+    gl.uniform1f(mainU.uRoughness, mesh.rough);
+    gl.uniform1f(mainU.uSpecular, mesh.spec);
+    gl.uniform1f(mainU.uIsWood, mesh.isWood);
+    drawObject(mesh, mainProg);
+  };
+  rodMeshes.forEach(drawMesh);
+  discMeshes.forEach(drawMesh);
+
+  requestAnimationFrame(render);
+}
+
+function resize() {
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  canvas.width  = Math.floor(canvas.clientWidth  * dpr);
+  canvas.height = Math.floor(canvas.clientHeight * dpr);
+}
+window.addEventListener('resize', resize);
+resize();
+
+gl.enable(gl.DEPTH_TEST);
+gl.disable(gl.CULL_FACE);
+
+resetGame();
+requestAnimationFrame(render);
+</script>
 </body>
 </html>

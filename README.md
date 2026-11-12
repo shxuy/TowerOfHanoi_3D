@@ -57,3 +57,17 @@ physics engine because I have to implement collusion detection and mouse selecti
 to reinvent the wheel and WebGL is a little low-level for games so I suggest you choosing any game engine such as 
 three.js to realize the feature. 
 
+## Update: Procedural Wood & AI-Assisted Modernization
+
+This project recently received a major visual and technical overhaul. The most significant change is that the wood texture is no longer an image file. It is now a 100% procedural texture generated in real-time by the GPU. By using fragment shaders and noise functions (mapped in polar coordinates for the rods' side and top faces), the wood grain, rings, and colors are calculated mathematically at 60fps.
+
+**Other upgrades in this refactored version:**
+*   **WebGL 2.0**: Upgraded from WebGL 1.0, utilizing native `DEPTH_COMPONENT24` for much cleaner and more accurate shadow mapping.
+*   **Zero External Dependencies**: Removed reliance on `twgl-full.js`, jQuery, and `woodTexture.js`. The entire game is now contained in a single, modern, vanilla JavaScript file.
+*   **Improved Lighting**: Added PCF (Percentage-Closer Filtering) for soft shadows and a Hemisphere lighting model for more natural ambient light. The ground and discs are now rendered with clean solid colors, while only the rods feature the procedural wood effect.
+
+**A Developer's Reflection in 2026**
+ 
+Looking back at 2018, writing the original WebGL 1 shadow mapping and debugging the `alert()` frame-rate bug took me an entire weekend of pure grinding. My original handwritten game logic and state machine were rock solid. 
+ 
+Fast forward to today, I asked an AI to rewrite the rendering pipeline and implement a highly realistic 3D procedural wood shader which I originally thought was too complex to do without external textures. The visual upgrade was done in just a few minutes — a pace that is truly mind-blowing.
